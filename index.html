@@ -1055,7 +1055,9 @@ window.addEventListener('DOMContentLoaded',zaLoadExcel);
    const {title,subtitle,filters}=exportContext(element);
    const showFilters=id!=='histCumulative'; // Gráfico acumulado é independente dos filtros da página.
    const graphic=await imageOfChart(element);
-   const width=Math.max(graphic.width,1200),margin=65;
+   const cardsElement=id==='histAnnual'?element.closest('.panel')?.querySelector('.history-kpi-cards'):null;
+   const cardsCanvas=cardsElement?await (await loadCapture())(cardsElement,{backgroundColor:'#ffffff',scale:3,useCORS:true,logging:false}):null;
+   const width=Math.max(graphic.width,cardsCanvas?.width||0,1200),margin=65;
    const canvas=document.createElement('canvas');canvas.width=width;
    const ctx=canvas.getContext('2d');const maxText=width-2*margin;
    const titleSize=45,subSize=25,filterSize=22,lineGap=12;
@@ -1064,7 +1066,8 @@ window.addEventListener('DOMContentLoaded',zaLoadExcel);
    ctx.font=filterSize+'px Arial';const filterLines=[];
    if(showFilters)for(const f of filters.length?filters:['Nenhum filtro específico selecionado'])filterLines.push(...lines(ctx,f,maxText));
    const top=margin+titleLines.length*55+(subtitleLines.length?15+subtitleLines.length*34:0)+(showFilters?32+35+filterLines.length*31+42:48);
-   canvas.height=top+graphic.height+margin;
+   const cardsGap=cardsCanvas?32:0;
+   canvas.height=top+(cardsCanvas?cardsCanvas.height+cardsGap:0)+graphic.height+margin;
    ctx.fillStyle='#ffffff';ctx.fillRect(0,0,canvas.width,canvas.height);
    let y=margin+35;ctx.fillStyle='#22364b';ctx.font='600 '+titleSize+'px Arial';
    titleLines.forEach(t=>{ctx.fillText(t,margin,y);y+=55;});
@@ -1074,7 +1077,8 @@ window.addEventListener('DOMContentLoaded',zaLoadExcel);
     ctx.fillStyle='#52657b';ctx.font=filterSize+'px Arial';filterLines.forEach(t=>{ctx.fillText(t,margin,y);y+=31;});
     ctx.strokeStyle='#e2e8f0';ctx.beginPath();ctx.moveTo(margin,y+13);ctx.lineTo(width-margin,y+13);ctx.stroke();
    }
-   ctx.drawImage(graphic,(width-graphic.width)/2,top);
+   if(cardsCanvas)ctx.drawImage(cardsCanvas,(width-cardsCanvas.width)/2,top);
+   ctx.drawImage(graphic,(width-graphic.width)/2,top+(cardsCanvas?cardsCanvas.height+cardsGap:0));
    download(canvas.toDataURL('image/png'),name);
   }catch(err){console.error('Erro ao exportar gráfico:',id,err);alert('Não foi possível gerar esta imagem. Verifique a conexão e tente novamente.');}
   finally{button.disabled=false;button.innerHTML=old;}
