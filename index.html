@@ -911,6 +911,192 @@ async function zaLoadExcel(){
  }catch(e){console.error('Falha ao carregar dados_za.xlsx:',e);}
 }
 window.addEventListener('DOMContentLoaded',zaLoadExcel);
-</script></body></html>
+</script>
+<style>
+/* Exportação individual de gráficos — versão de teste */
+.panel.chart-export-enabled{position:relative}
+.chart-export-button{position:absolute;right:16px;top:13px;display:inline-flex;align-items:center;gap:6px;border:1px solid #cbd5e1;background:#fff;color:#3F6476;border-radius:8px;padding:7px 10px;font-size:11px;font-weight:700;z-index:3;cursor:pointer;box-shadow:0 2px 5px #0000000b}
+.panel.chart-export-gap-bars>.chart-export-button{right:160px}
+.chart-export-button:hover{background:#eef5f5;border-color:#8BA688}
+.chart-export-button:disabled{opacity:.6;cursor:wait}
+.panel.chart-export-enabled>h3{padding-right:125px}
+@media(max-width:600px){.panel.chart-export-gap-bars>.chart-export-button{right:auto}.chart-export-button{position:static;margin-bottom:10px}.panel.chart-export-enabled>h3{padding-right:0}}
+</style>
+<script>
+(function(){
+ 'use strict';
+ const charts=[
+  ['donut','panorama_ucs_por_bioma'],
+  ['processBars','elaboracao_revisao_processos_por_etapa'],
+  ['processDonut','elaboracao_revisao_tipos_de_processo'],
+  ['histCumulative','historico_acumulado_planos_e_ucs'],
+  ['histAnnual','historico_producoes_por_ano'],
+  ['ptChartCoord','planejamentos_tematicos_por_coordenacao'],
+  ['ptChartDir','planejamentos_tematicos_por_diretoria'],
+  ['ptChartCg','planejamentos_tematicos_por_coordenacao_geral'],
+  ['ptChartSpecific','planejamentos_tematicos_especificos'],
+  ['ptGapBars','planejamentos_tematicos_sem_previsao_catalogo']
+ ];
+ let html2canvasPromise;
+ function loadCapture(){
+  if(window.html2canvas)return Promise.resolve(window.html2canvas);
+  if(!html2canvasPromise)html2canvasPromise=new Promise((resolve,reject)=>{
+   const script=document.createElement('script');
+   script.src='https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js';
+   script.onload=()=>window.html2canvas?resolve(window.html2canvas):reject(new Error('Biblioteca de imagem indisponível'));
+   script.onerror=()=>reject(new Error('Não foi possível carregar a biblioteca de imagem'));
+   document.head.appendChild(script);
+  }).catch(e=>{html2canvasPromise=null;throw e});
+  return html2canvasPromise;
+ }
+ function download(dataUrl,name){const a=document.createElement('a');a.href=dataUrl;a.download=name+'.png';document.body.appendChild(a);a.click();a.remove()}
+ function exportContext(element){
+  const panel=element.closest('.panel')||element;
+  const heading=panel.querySelector('h3,h2');
+  const title=heading?.textContent.trim()||'Gráfico';
+  const subtitle=heading?.nextElementSibling?.matches('p,.muted,.sub,.hint')?heading.nextElementSibling.textContent.trim():'';
+  const id=element.id;
+  const page=id.startsWith('process')?'processPage':id.startsWith('hist')?'historyPage':id.startsWith('pt')?'thematicPage':'panorama';
+  const root=document.getElementById(page);
+  const used=[];
+  const add=(label,values)=>{const vals=[...new Set((Array.isArray(values)?values:[values]).map(v=>String(v??'').trim()).filter(Boolean))];if(vals.length)used.push(label+': '+vals.join(', '));};
+  const controlLabel=(sel)=>root?.querySelector('label[for="'+sel.id+'"]')?.textContent.trim()||sel.getAttribute('aria-label')||sel.id;
+  if(page==='panorama'){
+   const labels={uc:'Unidade de Conservação',plano:'Plano de Manejo',categoria:'Categoria',bioma:'Bioma',grupo:'Grupo',gr:'GR',uf:'UF'};
+   for(const [key,set] of Object.entries(panoramaMulti)){
+    const sel=document.getElementById(key);const opts=sel?[...sel.options]:[];
+    if(set.size&&set.size<opts.filter(o=>o.value).length)add(labels[key]||key,[...set].map(v=>opts.find(o=>o.value===v)?.textContent.trim()||v));
+   }
+   if(document.getElementById('search')?.value.trim())add('Pesquisa',document.getElementById('search').value.trim());
+   if(selectedBiomes.size)add('Seleção no gráfico de biomas',[...selectedBiomes]);
+   if(selectedUCs.size)add('UCs selecionadas no mapa/tabela',selectedUCs.size+' unidade(s)');
+  }else{
+   const ids=page==='processPage'?['processUC','processTipo','processEtapa','processBioma','processGR']:page==='historyPage'?['histUC','histCategoria','histBioma','histGR','histAno']:['ptUc','ptDir','ptCg','ptCoord','ptGr'];
+   for(const fid of ids){
+    const sel=document.getElementById(fid);if(!sel)continue;
+    const chosen=page==='processPage'?processSlicerSelections.get(fid):page==='historyPage'?historySlicerSelections.get(fid):null;
+    if(chosen&&chosen.size){const opts=[...sel.options];if(chosen.size<opts.filter(o=>o.value).length)add(controlLabel(sel),[...chosen].map(v=>opts.find(o=>o.value===v)?.textContent.trim()||v));}
+    else if(!chosen){const opts=[...sel.selectedOptions].filter(o=>o.value&&!/^(todos|todas|all)$/i.test(o.value));if(opts.length)add(controlLabel(sel),opts.map(o=>o.textContent.trim()));}
+   }
+   const searchId=page==='processPage'?'processSearch':page==='historyPage'?'histSearch':'ptSearch';
+   const query=document.getElementById(searchId)?.value.trim();if(query)add('Pesquisa',query);
+   if(page==='processPage'){
+    if(selectedProcessStages.size)add('Etapas selecionadas no gráfico',[...selectedProcessStages]);
+    if(selectedProcessTypes.size)add('Tipos selecionados no gráfico',[...selectedProcessTypes]);
+    if(selectedProcess)add('Processo selecionado',String(selectedProcess));
+   }
+   if(page==='thematicPage'){
+    const names={coord:'Coordenação / Divisão',dir:'Diretoria / Presidência',cg:'Coordenação-Geral',specific:'Plano Temático Específico'};
+    for(const [key,val] of Object.entries(ptChartFilters))if(val)add('Seleção no gráfico — '+(names[key]||key),val);
+    if(ptGapThemeSelected)add('Tema sem previsão no Catálogo',ptGapThemeSelected);
+   }
+  }
+  return {title,subtitle,filters:[...new Set(used)]};
+ }
+ function lines(ctx,text,maxWidth){
+  const words=String(text).split(/\s+/);const result=[];let line='';
+  for(const word of words){const next=line?line+' '+word:word;if(ctx.measureText(next).width>maxWidth&&line){result.push(line);line=word;}else line=next;}
+  if(line)result.push(line);return result;
+ }
+ async function imageOfChart(element){
+  const instance=window.echarts&&window.echarts.getInstanceByDom(element);
+  if(instance){
+   const src=instance.getDataURL({type:'png',pixelRatio:3,backgroundColor:'#ffffff',excludeComponents:['toolbox']});
+   const img=new Image();await new Promise((resolve,reject)=>{img.onload=resolve;img.onerror=reject;img.src=src;});
+   return img;
+  }
+  const capture=await loadCapture();
+  // html2canvas não reproduz consistentemente conic-gradient. Para a exportação,
+  // desenhamos temporariamente as fatias em canvas, preservando a rosca e legenda.
+  const rings=[...element.querySelectorAll('.pt-donut-ring')];
+  const restorations=[];
+  try{
+   for(const ring of rings){
+    const gradient=getComputedStyle(ring).backgroundImage;
+    if(!gradient||!gradient.includes('conic-gradient'))continue;
+    const size=ring.getBoundingClientRect();
+    const w=Math.max(1,Math.round(size.width)),h=Math.max(1,Math.round(size.height));
+    const slices=ring.dataset.ptSlices?JSON.parse(ring.dataset.ptSlices):[];
+    const legend=[...element.querySelectorAll('.pt-legend-item')];
+    const counts=legend.map(node=>{
+     const t=node.querySelector('b')?.textContent||'';
+     const n=Number(t.split('·')[0].replace(/\./g,'').trim());
+     return Number.isFinite(n)?n:0;
+    });
+    const colors=legend.map(node=>getComputedStyle(node.querySelector('.pt-legend-dot')).backgroundColor);
+    const total=counts.reduce((a,b)=>a+b,0);
+    if(!total||!colors.length||colors.length!==counts.length)continue;
+    const donutCanvas=document.createElement('canvas');
+    donutCanvas.width=w*3;donutCanvas.height=h*3;
+    donutCanvas.style.cssText='position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:0';
+    const dc=donutCanvas.getContext('2d');dc.scale(3,3);
+    let angle=-Math.PI/2;
+    for(let i=0;i<counts.length;i++){
+     const next=angle+counts[i]/total*Math.PI*2;
+     dc.beginPath();dc.moveTo(w/2,h/2);dc.arc(w/2,h/2,Math.min(w,h)/2,angle,next);dc.closePath();
+     dc.fillStyle=colors[i];dc.fill();angle=next;
+    }
+    const oldBackground=ring.style.background;
+    const oldPosition=ring.style.position;
+    const hole=ring.querySelector('.pt-donut-hole');
+    const oldHolePosition=hole?.style.position,oldHoleZ=hole?.style.zIndex;
+    ring.style.background='none';ring.style.position='relative';
+    ring.insertBefore(donutCanvas,ring.firstChild);
+    if(hole){hole.style.position='relative';hole.style.zIndex='1';}
+    restorations.push(()=>{donutCanvas.remove();ring.style.background=oldBackground;ring.style.position=oldPosition;if(hole){hole.style.position=oldHolePosition;hole.style.zIndex=oldHoleZ;}});
+   }
+   return await capture(element,{backgroundColor:'#ffffff',scale:3,useCORS:true,logging:false});
+  }finally{restorations.reverse().forEach(restore=>restore());}
+ }
+ async function exportChart(id,name,button){
+  const element=document.getElementById(id);if(!element)return;
+  const old=button.innerHTML;button.disabled=true;button.textContent='Gerando...';
+  try{
+   const {title,subtitle,filters}=exportContext(element);
+   const showFilters=id!=='histCumulative'; // Gráfico acumulado é independente dos filtros da página.
+   const graphic=await imageOfChart(element);
+   const width=Math.max(graphic.width,1200),margin=65;
+   const canvas=document.createElement('canvas');canvas.width=width;
+   const ctx=canvas.getContext('2d');const maxText=width-2*margin;
+   const titleSize=45,subSize=25,filterSize=22,lineGap=12;
+   ctx.font='600 '+titleSize+'px Arial';const titleLines=lines(ctx,title,maxText);
+   ctx.font=subSize+'px Arial';const subtitleLines=subtitle?lines(ctx,subtitle,maxText):[];
+   ctx.font=filterSize+'px Arial';const filterLines=[];
+   if(showFilters)for(const f of filters.length?filters:['Nenhum filtro específico selecionado'])filterLines.push(...lines(ctx,f,maxText));
+   const top=margin+titleLines.length*55+(subtitleLines.length?15+subtitleLines.length*34:0)+(showFilters?32+35+filterLines.length*31+42:48);
+   canvas.height=top+graphic.height+margin;
+   ctx.fillStyle='#ffffff';ctx.fillRect(0,0,canvas.width,canvas.height);
+   let y=margin+35;ctx.fillStyle='#22364b';ctx.font='600 '+titleSize+'px Arial';
+   titleLines.forEach(t=>{ctx.fillText(t,margin,y);y+=55;});
+   if(subtitleLines.length){y+=10;ctx.fillStyle='#52657b';ctx.font=subSize+'px Arial';subtitleLines.forEach(t=>{ctx.fillText(t,margin,y);y+=34;});}
+   if(showFilters){
+    y+=30;ctx.fillStyle='#22364b';ctx.font='600 25px Arial';ctx.fillText('Filtros utilizados',margin,y);y+=35;
+    ctx.fillStyle='#52657b';ctx.font=filterSize+'px Arial';filterLines.forEach(t=>{ctx.fillText(t,margin,y);y+=31;});
+    ctx.strokeStyle='#e2e8f0';ctx.beginPath();ctx.moveTo(margin,y+13);ctx.lineTo(width-margin,y+13);ctx.stroke();
+   }
+   ctx.drawImage(graphic,(width-graphic.width)/2,top);
+   download(canvas.toDataURL('image/png'),name);
+  }catch(err){console.error('Erro ao exportar gráfico:',id,err);alert('Não foi possível gerar esta imagem. Verifique a conexão e tente novamente.');}
+  finally{button.disabled=false;button.innerHTML=old;}
+ }
+ function install(){
+  charts.forEach(([id,name])=>{
+   const element=document.getElementById(id),panel=element?.closest('.panel');
+   if(!panel||panel.querySelector('.chart-export-button'))return;
+   panel.classList.add('chart-export-enabled');
+   if(id==='ptGapBars')panel.classList.add('chart-export-gap-bars');
+   const button=document.createElement('button');
+   button.type='button';button.className='chart-export-button';
+   button.title='Baixar gráfico em PNG';button.setAttribute('aria-label','Baixar gráfico em PNG');
+   button.innerHTML='<span aria-hidden="true">↓</span> Baixar PNG';
+   button.addEventListener('click',()=>exportChart(id,name,button));
+   panel.insertBefore(button,panel.firstChild);
+  });
+ }
+ if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',install);
+ else install();
+})();
+</script>
+</body></html>
 
 <style>.history-version.middle,.history-version.first{background:#e5e7eb!important;color:#374151!important;border-color:#cbd5e1!important}.history-version.latest{background:#d1fae5!important;color:#065f46!important;border-color:#86efac!important}</style>
